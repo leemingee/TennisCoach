@@ -15,6 +15,14 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Video preview header
+            VideoPreviewHeader(video: video)
+                .padding(.horizontal)
+                .padding(.top, 8)
+
+            Divider()
+                .padding(.top, 8)
+
             // Messages list
             ScrollViewReader { proxy in
                 ScrollView {
@@ -117,7 +125,9 @@ struct MessageBubble: View {
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
-            .frame(maxWidth: UIScreen.main.bounds.width * 0.75, alignment: message.role == .user ? .trailing : .leading)
+            .containerRelativeFrame(.horizontal) { width, _ in
+                width * 0.75
+            }
 
             if message.role == .assistant {
                 Spacer()
@@ -146,7 +156,9 @@ struct StreamingMessageBubble: View {
                 .background(Color(.systemGray5))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
             }
-            .frame(maxWidth: UIScreen.main.bounds.width * 0.75, alignment: .leading)
+            .containerRelativeFrame(.horizontal) { width, _ in
+                width * 0.75
+            }
 
             Spacer()
         }

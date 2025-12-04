@@ -1,25 +1,31 @@
-//
-//  TennisCoachApp.swift
-//  TennisCoach
-//
-//  Created by Yoyo on 12/4/25.
-//
-
 import SwiftUI
 import SwiftData
 
 @main
 struct TennisCoachApp: App {
+
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            Video.self,
+            Conversation.self,
+            Message.self
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
         do {
             return try ModelContainer(for: schema, configurations: [modelConfiguration])
         } catch {
-            fatalError("Could not create ModelContainer: \(error)")
+            // Log the error for debugging
+            print("Failed to create persistent ModelContainer: \(error)")
+
+            // Fallback to in-memory storage to prevent crashes
+            do {
+                let fallbackConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+                return try ModelContainer(for: schema, configurations: [fallbackConfig])
+            } catch {
+                // This should rarely happen, but provides a clear error
+                preconditionFailure("Failed to create fallback ModelContainer: \(error)")
+            }
         }
     }()
 

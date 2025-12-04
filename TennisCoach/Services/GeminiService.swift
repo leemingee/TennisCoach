@@ -253,7 +253,9 @@ final class GeminiService: GeminiServicing {
         let mimeType = "video/mp4"
 
         // Step 1: Start resumable upload with retry logic
-        let startURL = URL(string: "\(baseURL)/upload/\(Constants.API.apiVersion)/files")!
+        guard let startURL = URL(string: "\(baseURL)/upload/\(Constants.API.apiVersion)/files") else {
+            throw GeminiError.uploadFailed("Invalid upload URL")
+        }
         var startRequest = URLRequest(url: startURL)
         startRequest.httpMethod = "POST"
         startRequest.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
@@ -275,7 +277,10 @@ final class GeminiService: GeminiServicing {
         }
 
         // Step 2: Stream upload the file data
-        var uploadRequest = URLRequest(url: URL(string: uploadURL)!)
+        guard let uploadTargetURL = URL(string: uploadURL) else {
+            throw GeminiError.uploadFailed("Invalid upload target URL")
+        }
+        var uploadRequest = URLRequest(url: uploadTargetURL)
         uploadRequest.httpMethod = "POST"
         uploadRequest.setValue("upload, finalize", forHTTPHeaderField: "X-Goog-Upload-Command")
         uploadRequest.setValue("0", forHTTPHeaderField: "X-Goog-Upload-Offset")
@@ -348,7 +353,9 @@ final class GeminiService: GeminiServicing {
     private func waitForFileProcessing(fileUri: String) async throws {
         // Extract file name from URI
         let fileName = fileUri.components(separatedBy: "/").last ?? ""
-        let statusURL = URL(string: "\(baseURL)/\(Constants.API.apiVersion)/files/\(fileName)")!
+        guard let statusURL = URL(string: "\(baseURL)/\(Constants.API.apiVersion)/files/\(fileName)") else {
+            throw GeminiError.uploadFailed("Invalid status check URL")
+        }
 
         // Custom retry policy for file processing: more attempts, longer delays
         let processingPolicy = RetryPolicy(
@@ -458,7 +465,9 @@ final class GeminiService: GeminiServicing {
             throw GeminiError.invalidAPIKey
         }
 
-        let url = URL(string: "\(baseURL)/\(Constants.API.apiVersion)/models/\(model):streamGenerateContent?alt=sse")!
+        guard let url = URL(string: "\(baseURL)/\(Constants.API.apiVersion)/models/\(model):streamGenerateContent?alt=sse") else {
+            throw GeminiError.analysisFailed("Invalid API URL")
+        }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"

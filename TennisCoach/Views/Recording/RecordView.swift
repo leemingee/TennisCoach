@@ -12,29 +12,46 @@ struct RecordView: View {
                 CameraPreviewView(previewLayer: viewModel.previewLayer)
                     .ignoresSafeArea()
 
-                // Overlay controls
-                VStack {
-                    Spacer()
-
-                    // Recording indicator
-                    if viewModel.isRecording {
-                        RecordingIndicator(duration: viewModel.recordingDuration)
-                            .padding(.bottom, 20)
-                    }
-
-                    // Record button
-                    RecordButton(
-                        isRecording: viewModel.isRecording,
-                        isProcessing: viewModel.isProcessing
-                    ) {
-                        Task {
-                            await viewModel.toggleRecording(modelContext: modelContext)
-                        }
-                    }
-                    .padding(.bottom, 40)
+                // Loading overlay while camera initializes
+                if case .initializing = viewModel.cameraState {
+                    CameraLoadingOverlay()
                 }
 
-                // Error overlay
+                // Camera error overlay
+                if case .error(let message) = viewModel.cameraState {
+                    CameraErrorOverlay(message: message) {
+                        Task {
+                            await viewModel.setup()
+                        }
+                    }
+                }
+
+                // Overlay controls (only show when camera is ready or recording)
+                if viewModel.cameraState.isReady || viewModel.cameraState.isRecording {
+                    VStack {
+                        Spacer()
+
+                        // Recording indicator
+                        if viewModel.isRecording {
+                            RecordingIndicator(duration: viewModel.recordingDuration)
+                                .padding(.bottom, 20)
+                        }
+
+                        // Record button
+                        RecordButton(
+                            isRecording: viewModel.isRecording,
+                            isProcessing: viewModel.isProcessing,
+                            isEnabled: viewModel.canRecord || viewModel.isRecording
+                        ) {
+                            Task {
+                                await viewModel.toggleRecording(modelContext: modelContext)
+                            }
+                        }
+                        .padding(.bottom, 40)
+                    }
+                }
+
+                // Error overlay for recording errors
                 if let error = viewModel.error {
                     ErrorOverlay(message: error) {
                         viewModel.dismissError()
@@ -50,6 +67,11 @@ struct RecordView: View {
             .navigationBarTitleDisplayMode(.inline)
             .task {
                 await viewModel.setup()
+            }
+            .onAppear {
+                Task {
+                    await viewModel.resumeSession()
+                }
             }
             .navigationDestination(item: $viewModel.savedVideo) { video in
                 ChatView(video: video)
@@ -84,7 +106,12 @@ struct CameraPreviewView: UIViewRepresentable {
 struct RecordButton: View {
     let isRecording: Bool
     let isProcessing: Bool
+    var isEnabled: Bool = true
     let action: () -> Void
+
+    private var isDisabled: Bool {
+        isProcessing || !isEnabled
+    }
 
     var body: some View {
         Button(action: action) {
@@ -104,8 +131,8 @@ struct RecordButton: View {
                 }
             }
         }
-        .disabled(isProcessing)
-        .opacity(isProcessing ? 0.5 : 1)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.5 : 1)
     }
 }
 
@@ -191,6 +218,55 @@ struct ProcessingOverlay: View {
         .padding(32)
         .background(Color.black.opacity(0.8))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+// MARK: - Camera Loading Overlay
+
+struct CameraLoadingOverlay: View {
+    var body: some View {
+        VStack(spacing: 20) {
+            ProgressView()
+                .scaleEffect(1.8)
+                .tint(.white)
+
+            Text("正在启动相机...")
+                .font(.headline)
+                .foregroundColor(.white)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(0.7))
+    }
+}
+
+// MARK: - Camera Error Overlay
+
+struct CameraErrorOverlay: View {
+    let message: String
+    let onRetry: () -> Void
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "camera.fill")
+                .font(.system(size: 48))
+                .foregroundColor(.gray)
+
+            Text(message)
+                .font(.headline)
+                .foregroundColor(.white)
+                .multilineTextAlignment(.center)
+
+            Button(action: onRetry) {
+                HStack {
+                    Image(systemName: "arrow.clockwise")
+                    Text("重试")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(0.85))
     }
 }
 

@@ -59,6 +59,11 @@ final class VideoRecorder: NSObject, VideoRecording {
 
     private(set) var isRecording = false
 
+    /// Check if the capture session is currently running
+    var isSessionRunning: Bool {
+        captureSession.isRunning
+    }
+
     lazy var previewLayer: AVCaptureVideoPreviewLayer = {
         let layer = AVCaptureVideoPreviewLayer(session: captureSession)
         layer.videoGravity = .resizeAspectFill
@@ -113,6 +118,15 @@ final class VideoRecorder: NSObject, VideoRecording {
 
     func stopSession() {
         captureSession.stopRunning()
+    }
+
+    /// Resume the capture session if it was stopped
+    func resumeSession() async {
+        guard !captureSession.isRunning else { return }
+
+        await MainActor.run {
+            captureSession.startRunning()
+        }
     }
 
     private func configureSession() throws {

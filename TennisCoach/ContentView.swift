@@ -71,6 +71,37 @@ struct SettingsView: View {
                         Text("1.0.0")
                             .foregroundColor(.secondary)
                     }
+
+                    Link(destination: URL(string: "mailto:leemingee1995@gmail.com")!) {
+                        HStack {
+                            Label("Contact Developer", systemImage: "envelope.fill")
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .foregroundColor(.primary)
+
+                    Link(destination: URL(string: "https://github.com/leemingee/TennisCoach")!) {
+                        HStack {
+                            Label("GitHub Repository", systemImage: "chevron.left.forwardslash.chevron.right")
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .foregroundColor(.primary)
+                }
+
+                Section {
+                    Text("TennisCoach is open source. Contributions are welcome!")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .listRowBackground(Color.clear)
                 }
             }
             .navigationTitle("设置")

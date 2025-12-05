@@ -62,6 +62,7 @@ final class RecordViewModel: ObservableObject {
     @Published var error: String?
     @Published var savedVideo: Video?
     @Published var showDurationWarning = false  // Shows when approaching time limit
+    @Published var currentLens: CameraLens = .wide  // Current camera lens
 
     // MARK: - Private Properties
 
@@ -92,6 +93,16 @@ final class RecordViewModel: ObservableObject {
     var formattedRemainingTime: String {
         let remaining = Int(remainingTime)
         return String(format: "%d:%02d", remaining / 60, remaining % 60)
+    }
+
+    /// Available camera lenses on this device
+    var availableLenses: [CameraLens] {
+        videoRecorder?.availableLenses ?? [.wide]
+    }
+
+    /// Check if lens switching is allowed (not recording, camera ready)
+    var canSwitchLens: Bool {
+        !isRecording && cameraState.isReady
     }
 
     // MARK: - Setup
@@ -318,6 +329,24 @@ final class RecordViewModel: ObservableObject {
         timerTask?.cancel()
         timerTask = nil
         showDurationWarning = false
+    }
+
+    // MARK: - Lens Switching
+
+    /// Switch to a different camera lens.
+    /// - Parameter lens: The desired camera lens
+    func switchLens(to lens: CameraLens) {
+        guard canSwitchLens else {
+            AppLogger.warning("Cannot switch lens: recording or camera not ready", category: AppLogger.video)
+            return
+        }
+
+        do {
+            try videoRecorder?.switchLens(to: lens)
+            currentLens = lens
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     // MARK: - Error Handling

@@ -41,6 +41,18 @@ struct RecordView: View {
                             .padding(.bottom, 20)
                         }
 
+                        // Lens switcher (only show when not recording)
+                        if !viewModel.isRecording && viewModel.availableLenses.count > 1 {
+                            LensSwitcher(
+                                availableLenses: viewModel.availableLenses,
+                                currentLens: viewModel.currentLens,
+                                isEnabled: viewModel.canSwitchLens
+                            ) { lens in
+                                viewModel.switchLens(to: lens)
+                            }
+                            .padding(.bottom, 16)
+                        }
+
                         // Record button
                         RecordButton(
                             isRecording: viewModel.isRecording,
@@ -198,6 +210,42 @@ struct RecordingIndicator: View {
     private var formattedRemaining: String {
         let remaining = max(0, Int(remainingTime))
         return "\(remaining)秒"
+    }
+}
+
+// MARK: - Lens Switcher
+
+/// Horizontal lens selector with pills for each available lens.
+/// Shows 0.5x, 1x, 2x options based on device capabilities.
+struct LensSwitcher: View {
+    let availableLenses: [CameraLens]
+    let currentLens: CameraLens
+    let isEnabled: Bool
+    let onSelect: (CameraLens) -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(availableLenses, id: \.self) { lens in
+                Button {
+                    onSelect(lens)
+                } label: {
+                    Text(lens.displayName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(lens == currentLens ? .black : .white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(
+                            Capsule()
+                                .fill(lens == currentLens ? Color.yellow : Color.white.opacity(0.3))
+                        )
+                }
+                .disabled(!isEnabled)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.black.opacity(0.5))
+        .clipShape(Capsule())
     }
 }
 

@@ -22,6 +22,45 @@ protocol VideoRecording: AnyObject {
     func stopRecording() async throws -> URL
 }
 
+// MARK: - Camera Lens
+
+/// Available camera lenses for recording.
+/// Maps to physical iPhone camera modules.
+enum CameraLens: String, CaseIterable {
+    case ultraWide = "0.5x"   // Ultra-wide angle (13mm equivalent)
+    case wide = "1x"          // Standard wide angle (26mm equivalent)
+    case telephoto = "2x"     // Telephoto (52mm equivalent, or 2x digital zoom)
+
+    var displayName: String { rawValue }
+
+    /// SF Symbol for the lens
+    var systemImage: String {
+        switch self {
+        case .ultraWide: return "camera.aperture"
+        case .wide: return "camera"
+        case .telephoto: return "camera.macro"
+        }
+    }
+
+    /// AVCaptureDevice type for this lens
+    var deviceType: AVCaptureDevice.DeviceType {
+        switch self {
+        case .ultraWide: return .builtInUltraWideCamera
+        case .wide: return .builtInWideAngleCamera
+        case .telephoto: return .builtInTelephotoCamera
+        }
+    }
+
+    /// Zoom factor for digital zoom fallback
+    var zoomFactor: CGFloat {
+        switch self {
+        case .ultraWide: return 0.5  // Will use ultrawide if available
+        case .wide: return 1.0
+        case .telephoto: return 2.0
+        }
+    }
+}
+
 // MARK: - Errors
 
 enum VideoRecorderError: LocalizedError {
@@ -32,6 +71,7 @@ enum VideoRecorderError: LocalizedError {
     case recordingFailed(String)
     case noRecordingInProgress
     case recordingTimeout
+    case lensNotAvailable
 
     var errorDescription: String? {
         switch self {
@@ -49,6 +89,8 @@ enum VideoRecorderError: LocalizedError {
             return "当前没有正在进行的录制"
         case .recordingTimeout:
             return "录制停止超时"
+        case .lensNotAvailable:
+            return "该镜头不可用"
         }
     }
 }
@@ -80,16 +122,30 @@ final class VideoRecorder: NSObject, VideoRecording {
     private let captureSession = AVCaptureSession()
     private var movieOutput = AVCaptureMovieFileOutput()
     private var currentRecordingURL: URL?
+    private var currentVideoDevice: AVCaptureDevice?
+    private var currentVideoInput: AVCaptureDeviceInput?
 
     /// Continuation for bridging delegate callback to async/await
     private var recordingContinuation: CheckedContinuation<URL, Error>?
 
     private(set) var isRecording = false
 
+    /// Currently selected camera lens
+    private(set) var currentLens: CameraLens = .wide
+
     /// Check if the capture session is currently running.
     /// Used by RecordViewModel to verify camera is ready before recording.
     var isSessionRunning: Bool {
         captureSession.isRunning
+    }
+
+    /// Available lenses on this device.
+    /// Determined at runtime based on device capabilities.
+    var availableLenses: [CameraLens] {
+        CameraLens.allCases.filter { lens in
+            AVCaptureDevice.default(lens.deviceType, for: .video, position: .back) != nil ||
+            (lens == .telephoto && currentVideoDevice != nil) // 2x digital zoom always available
+        }
     }
 
     /// Preview layer for displaying camera feed in SwiftUI via UIViewRepresentable.
@@ -177,6 +233,10 @@ final class VideoRecorder: NSObject, VideoRecording {
             throw VideoRecorderError.cameraUnavailable
         }
 
+        // Store reference for lens switching
+        currentVideoDevice = videoDevice
+        currentLens = .wide
+
         // Configure 60fps for smooth tennis motion capture
         // Higher frame rate = better slow-motion analysis and AI frame extraction
         try configureFrameRate(device: videoDevice, desiredFPS: Constants.Video.preferredFPS)
@@ -184,6 +244,7 @@ final class VideoRecorder: NSObject, VideoRecording {
         let videoInput = try AVCaptureDeviceInput(device: videoDevice)
         if captureSession.canAddInput(videoInput) {
             captureSession.addInput(videoInput)
+            currentVideoInput = videoInput
         }
 
         // Add audio input
@@ -248,6 +309,92 @@ final class VideoRecorder: NSObject, VideoRecording {
             device.activeVideoMaxFrameDuration = frameDuration
             device.unlockForConfiguration()
         }
+    }
+
+    // MARK: - Lens Switching
+
+    /// Switch to a different camera lens.
+    ///
+    /// Strategy:
+    /// 1. Try to use the physical lens (ultra-wide, wide, telephoto)
+    /// 2. If physical lens unavailable, use digital zoom on current device
+    ///
+    /// - Parameter lens: The desired camera lens
+    /// - Throws: VideoRecorderError if switching fails
+    func switchLens(to lens: CameraLens) throws {
+        guard !isRecording else {
+            AppLogger.warning("Cannot switch lens while recording", category: AppLogger.video)
+            return
+        }
+
+        // Try to get the physical camera for this lens
+        if let device = AVCaptureDevice.default(lens.deviceType, for: .video, position: .back) {
+            try switchToPhysicalCamera(device: device, lens: lens)
+        } else if lens == .telephoto, let device = currentVideoDevice {
+            // Fall back to digital zoom for telephoto
+            try applyDigitalZoom(to: device, factor: lens.zoomFactor)
+            currentLens = lens
+        } else if lens == .ultraWide {
+            // Ultra-wide not available, log and ignore
+            AppLogger.warning("Ultra-wide camera not available on this device", category: AppLogger.video)
+            throw VideoRecorderError.lensNotAvailable
+        } else {
+            throw VideoRecorderError.lensNotAvailable
+        }
+    }
+
+    /// Switch to a physical camera device.
+    private func switchToPhysicalCamera(device: AVCaptureDevice, lens: CameraLens) throws {
+        captureSession.beginConfiguration()
+        defer { captureSession.commitConfiguration() }
+
+        // Remove current video input
+        if let currentInput = currentVideoInput {
+            captureSession.removeInput(currentInput)
+        }
+
+        // Configure new device
+        try configureFrameRate(device: device, desiredFPS: Constants.Video.preferredFPS)
+
+        // Add new input
+        let newInput = try AVCaptureDeviceInput(device: device)
+        if captureSession.canAddInput(newInput) {
+            captureSession.addInput(newInput)
+            currentVideoInput = newInput
+            currentVideoDevice = device
+            currentLens = lens
+
+            // Reset zoom to 1x when switching physical cameras
+            try? applyDigitalZoom(to: device, factor: 1.0)
+
+            AppLogger.info("Switched to \(lens.displayName) lens", category: AppLogger.video)
+        } else {
+            // Re-add old input if new one fails
+            if let oldInput = currentVideoInput {
+                captureSession.addInput(oldInput)
+            }
+            throw VideoRecorderError.sessionConfigurationFailed
+        }
+
+        // Re-enable stabilization on new connection
+        if let connection = movieOutput.connection(with: .video),
+           connection.isVideoStabilizationSupported {
+            connection.preferredVideoStabilizationMode = .auto
+        }
+    }
+
+    /// Apply digital zoom to the current camera device.
+    private func applyDigitalZoom(to device: AVCaptureDevice, factor: CGFloat) throws {
+        try device.lockForConfiguration()
+        defer { device.unlockForConfiguration() }
+
+        // Clamp zoom factor to device limits
+        let minZoom = device.minAvailableVideoZoomFactor
+        let maxZoom = min(device.maxAvailableVideoZoomFactor, 4.0) // Cap at 4x for quality
+        let clampedFactor = min(max(factor, minZoom), maxZoom)
+
+        device.videoZoomFactor = clampedFactor
+        AppLogger.info("Applied \(clampedFactor)x digital zoom", category: AppLogger.video)
     }
 
     // MARK: - Recording

@@ -17,7 +17,11 @@ An iOS app for recording tennis videos and getting AI-powered analysis using Goo
 - **Save to Photos**: Export videos to iPhone Photos Library for backup and sharing
 - **Auto-Save Option**: Videos automatically saved to Photos Library after recording
 
-### Camera Improvements (v1.1)
+### Camera Improvements (v1.2)
+- **Lens Switching**: 0.5x (ultra-wide), 1x (standard), 2x (telephoto/digital zoom)
+- **Tap-to-Focus**: Tap anywhere on preview to focus with visual indicator
+- **Recording Time Limits**: 30s@60fps / 45s@30fps based on 100MB Gemini limit
+- **Auto-Stop with Warning**: Orange indicator 10 seconds before limit
 - **Smart Initialization**: Loading indicator during camera setup
 - **Session Management**: Camera automatically resumes when returning to Recording tab
 - **State Indicators**: Clear visual feedback for camera status (initializing, ready, recording, error)
@@ -189,11 +193,12 @@ xcodebuild test -scheme TennisCoach -destination 'platform=iOS Simulator,name=iP
 
 ## Documentation
 
+- `docs/PRODUCT_VISION.md` - Product roadmap and feature priorities
 - `DESIGN.md` - Detailed design document (Chinese)
 - `ARCHITECTURE_REVIEW.md` - Storage architecture recommendations
+- `TROUBLESHOOTING.md` - Common issues and solutions
 - `working_docs/` - Iteration planning and code review findings
 - `best-practice/` - iOS development guidelines
-- `Documentation/` - Additional docs and examples
 
 ## Troubleshooting
 

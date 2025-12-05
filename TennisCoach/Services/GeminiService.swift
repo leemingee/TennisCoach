@@ -2,7 +2,14 @@ import Foundation
 
 // MARK: - Protocol
 
-/// Protocol for Gemini API service
+/// Protocol defining the Gemini API service interface.
+///
+/// This protocol enables dependency injection for testing. The service handles:
+/// - Video file uploads via Gemini's resumable upload protocol
+/// - Streaming AI analysis using Server-Sent Events (SSE)
+/// - Multi-turn conversations with video context
+///
+/// All methods are async and use Swift's modern concurrency model.
 protocol GeminiServicing {
     /// Upload a video file to Gemini File API with progress tracking
     /// - Parameters:
@@ -51,6 +58,7 @@ extension GeminiServicing {
 enum GeminiError: LocalizedError, RetryableError {
     case invalidAPIKey
     case uploadFailed(String)
+    case fileTooLarge(sizeBytes: Int64, maxBytes: Int64)
     case fileProcessing
     case analysisFailed(String)
     case networkError(Error)
@@ -64,6 +72,10 @@ enum GeminiError: LocalizedError, RetryableError {
             return "API Key 未设置或无效"
         case .uploadFailed(let message):
             return "视频上传失败: \(message)"
+        case .fileTooLarge(let sizeBytes, let maxBytes):
+            let sizeMB = Double(sizeBytes) / (1024 * 1024)
+            let maxMB = Double(maxBytes) / (1024 * 1024)
+            return "视频文件过大 (\(String(format: "%.1f", sizeMB))MB)，最大支持 \(String(format: "%.0f", maxMB))MB"
         case .fileProcessing:
             return "视频正在处理中，请稍后再试"
         case .analysisFailed(let message):
@@ -86,7 +98,7 @@ enum GeminiError: LocalizedError, RetryableError {
             // Don't retry authentication errors
             return .doNotRetry
 
-        case .uploadFailed, .analysisFailed:
+        case .uploadFailed, .analysisFailed, .fileTooLarge:
             // Don't retry explicit failures (may contain validation errors)
             return .doNotRetry
 
@@ -124,10 +136,23 @@ enum GeminiError: LocalizedError, RetryableError {
 
 // MARK: - Upload Delegate
 
-/// URLSession delegate for tracking upload progress
-@MainActor
+/// URLSession delegate for tracking upload progress.
+///
+/// This delegate is used during video file uploads to report real-time progress.
+/// The progress handler is called on the main thread for safe UI updates.
+///
+/// ## Thread Safety (P0 Fix)
+/// - Properties are immutable (let) and set only in init
+/// - URLSession calls delegate methods on its background queue
+/// - We dispatch progress updates to MainActor for UI safety
+/// - The class is Sendable because all properties are immutable and @Sendable
 final class UploadProgressDelegate: NSObject, URLSessionTaskDelegate, Sendable {
+    /// Closure to call with progress updates (0.0 to 1.0)
+    /// Marked @Sendable for safe cross-actor calls
     private let progressHandler: @Sendable (Double) -> Void
+
+    /// Expected total bytes for fallback progress calculation
+    /// Immutable after init, safe to access from any thread
     private let totalBytes: Int64
 
     init(totalBytes: Int64, progressHandler: @escaping @Sendable (Double) -> Void) {
@@ -136,24 +161,54 @@ final class UploadProgressDelegate: NSObject, URLSessionTaskDelegate, Sendable {
         super.init()
     }
 
-    nonisolated func urlSession(
+    /// Called by URLSession as upload data is sent.
+    ///
+    /// This method is called on URLSession's delegate queue (background thread).
+    /// We dispatch to MainActor for thread-safe UI updates.
+    ///
+    /// - Parameters:
+    ///   - bytesSent: Bytes sent in this chunk
+    ///   - totalBytesSent: Cumulative bytes sent so far
+    ///   - totalBytesExpectedToSend: Total file size (-1 if unknown)
+    func urlSession(
         _ session: URLSession,
         task: URLSessionTask,
         didSendBodyData bytesSent: Int64,
         totalBytesSent: Int64,
         totalBytesExpectedToSend: Int64
     ) {
+        // Use URLSession's reported total if available, otherwise use our stored value
+        // URLSession reports -1 if content length is unknown
         let total = totalBytesExpectedToSend > 0 ? totalBytesExpectedToSend : totalBytes
         let progress = Double(totalBytesSent) / Double(total)
 
+        // Dispatch to MainActor for thread-safe UI update
         Task { @MainActor in
-            progressHandler(progress)
+            self.progressHandler(progress)
         }
     }
 }
 
 // MARK: - Implementation
 
+/// Main implementation of the Gemini API service.
+///
+/// This service handles all communication with Google's Gemini API for video analysis:
+///
+/// ## Upload Flow (Resumable Protocol)
+/// 1. Start resumable upload → get upload URL
+/// 2. Stream video file to upload URL with progress tracking
+/// 3. Poll for file processing completion (ACTIVE state)
+///
+/// ## Analysis Flow (SSE Streaming)
+/// 1. Send video fileUri + prompt to streamGenerateContent endpoint
+/// 2. Parse Server-Sent Events (SSE) for real-time text chunks
+/// 3. Return AsyncThrowingStream for SwiftUI consumption
+///
+/// ## Retry Logic
+/// - Uses exponential backoff via RetryExecutor
+/// - Respects HTTP Retry-After headers
+/// - Different policies for upload vs. streaming (conservative for streams)
 final class GeminiService: GeminiServicing {
 
     private let apiKey: String
@@ -162,6 +217,12 @@ final class GeminiService: GeminiServicing {
     private let session: URLSession
     private let retryExecutor: RetryExecutor
 
+    /// Initialize the Gemini service.
+    /// - Parameters:
+    ///   - apiKey: Gemini API key (defaults to stored key from Constants)
+    ///   - baseURL: API base URL (defaults to production)
+    ///   - model: Model name to use (defaults to gemini-2.0-flash)
+    ///   - session: URLSession for network requests (injectable for testing)
     init(
         apiKey: String = Constants.API.apiKey,
         baseURL: String = Constants.API.geminiBaseURL,
@@ -232,6 +293,18 @@ final class GeminiService: GeminiServicing {
 
     // MARK: - Upload Video
 
+    /// Upload a video file to Gemini using the resumable upload protocol.
+    ///
+    /// The upload happens in 3 phases:
+    /// 1. **Initialize**: POST to /upload/files to get a resumable upload URL
+    /// 2. **Upload**: Stream file bytes to the upload URL with progress tracking
+    /// 3. **Poll**: Wait for server-side processing (ACTIVE state)
+    ///
+    /// - Parameters:
+    ///   - localURL: Local file URL of the video to upload
+    ///   - progressHandler: Optional callback for upload progress (0.0-1.0)
+    /// - Returns: The Gemini fileUri for use in analysis requests
+    /// - Throws: GeminiError on failure
     func uploadVideo(
         localURL: URL,
         progressHandler: ((Double) -> Void)?
@@ -240,7 +313,7 @@ final class GeminiService: GeminiServicing {
             throw GeminiError.invalidAPIKey
         }
 
-        // Validate file exists and get attributes
+        // Validate file exists and get size for progress calculation
         guard FileManager.default.fileExists(atPath: localURL.path) else {
             throw GeminiError.uploadFailed("File does not exist")
         }
@@ -250,9 +323,22 @@ final class GeminiService: GeminiServicing {
             throw GeminiError.uploadFailed("Unable to determine file size")
         }
 
+        // Validate file size before attempting upload
+        let maxSize = Constants.Video.maxUploadSizeBytes
+        if fileSize > maxSize {
+            AppLogger.warning("File too large for upload: \(fileSize) bytes (max: \(maxSize))", category: AppLogger.network)
+            throw GeminiError.fileTooLarge(sizeBytes: fileSize, maxBytes: maxSize)
+        }
+
+        // Log warning for large files that may take a while
+        if fileSize > Constants.Video.largeFileSizeWarningBytes {
+            AppLogger.info("Large file upload starting: \(fileSize / (1024 * 1024))MB", category: AppLogger.network)
+        }
+
         let mimeType = "video/mp4"
 
-        // Step 1: Start resumable upload with retry logic
+        // === PHASE 1: Initialize resumable upload ===
+        // This returns a unique upload URL that accepts the file bytes
         guard let startURL = URL(string: "\(baseURL)/upload/\(Constants.API.apiVersion)/files") else {
             throw GeminiError.uploadFailed("Invalid upload URL")
         }
@@ -276,7 +362,8 @@ final class GeminiService: GeminiServicing {
             throw GeminiError.uploadFailed("Failed to get upload URL")
         }
 
-        // Step 2: Stream upload the file data
+        // === PHASE 2: Stream upload file bytes ===
+        // Uses a dedicated URLSession with progress delegate for real-time tracking
         guard let uploadTargetURL = URL(string: uploadURL) else {
             throw GeminiError.uploadFailed("Invalid upload target URL")
         }
@@ -293,12 +380,14 @@ final class GeminiService: GeminiServicing {
 
         // Use streaming upload if progress handler is provided
         if let progressHandler = progressHandler {
-            // Create dedicated session with progress delegate
+            // Create dedicated URLSession with progress delegate
+            // Using ephemeral config to avoid caching large video data
             let configuration = URLSessionConfiguration.ephemeral
-            configuration.timeoutIntervalForRequest = 300 // 5 minutes
-            configuration.timeoutIntervalForResource = 3600 // 1 hour
+            configuration.timeoutIntervalForRequest = 300 // 5 minutes for slow networks
+            configuration.timeoutIntervalForResource = 3600 // 1 hour for large files
 
-            let delegate = await UploadProgressDelegate(
+            // Delegate tracks upload progress and dispatches to MainActor for UI updates
+            let delegate = UploadProgressDelegate(
                 totalBytes: fileSize,
                 progressHandler: progressHandler
             )
@@ -337,27 +426,39 @@ final class GeminiService: GeminiServicing {
             responseData = data
         }
 
-        // Parse the response to get fileUri
+        // Parse response to extract the fileUri (e.g., "files/abc123")
         guard let json = try JSONSerialization.jsonObject(with: responseData) as? [String: Any],
               let file = json["file"] as? [String: Any],
               let fileUri = file["uri"] as? String else {
             throw GeminiError.uploadFailed("Failed to parse upload response")
         }
 
-        // Step 3: Wait for file to be processed
+        // === PHASE 3: Poll for processing completion ===
+        // Gemini processes video server-side; we poll until state becomes ACTIVE
         try await waitForFileProcessing(fileUri: fileUri)
 
         return fileUri
     }
 
+    /// Poll Gemini API until the uploaded file is ready for use.
+    ///
+    /// After upload, Gemini processes the video server-side. We poll the file
+    /// status endpoint until the state becomes "ACTIVE" (ready) or "FAILED".
+    ///
+    /// Uses a custom retry policy with:
+    /// - 30 attempts (allows ~60 seconds for processing)
+    /// - 1-3 second delays between polls
+    /// - Slow multiplier (1.1x) since we expect many polls
     private func waitForFileProcessing(fileUri: String) async throws {
-        // Extract file name from URI
+        // Extract file name from URI (e.g., "files/abc123" → "abc123")
         let fileName = fileUri.components(separatedBy: "/").last ?? ""
         guard let statusURL = URL(string: "\(baseURL)/\(Constants.API.apiVersion)/files/\(fileName)") else {
             throw GeminiError.uploadFailed("Invalid status check URL")
         }
 
-        // Custom retry policy for file processing: more attempts, longer delays
+        // Custom retry policy optimized for file processing polling
+        // - More attempts than default (video processing can take 30-60 seconds)
+        // - Shorter delays (we want responsive status updates)
         let processingPolicy = RetryPolicy(
             maxAttempts: 30,
             initialDelay: 1.0,
@@ -458,6 +559,16 @@ final class GeminiService: GeminiServicing {
 
     // MARK: - Private Helpers
 
+    /// Create a streaming content generation request to Gemini.
+    ///
+    /// This method handles the SSE (Server-Sent Events) streaming protocol:
+    /// 1. Send multi-turn conversation contents to streamGenerateContent endpoint
+    /// 2. Parse "data: {...}" lines from the SSE stream
+    /// 3. Extract text chunks from candidates[0].content.parts[0].text
+    /// 4. Yield chunks via AsyncThrowingStream for real-time UI updates
+    ///
+    /// - Parameter contents: Array of conversation turns (user/model roles)
+    /// - Returns: AsyncThrowingStream yielding text chunks as they arrive
     private func generateContentStream(
         contents: [[String: Any]]
     ) async throws -> AsyncThrowingStream<String, Error> {
@@ -465,6 +576,7 @@ final class GeminiService: GeminiServicing {
             throw GeminiError.invalidAPIKey
         }
 
+        // Use SSE streaming endpoint (?alt=sse)
         guard let url = URL(string: "\(baseURL)/\(Constants.API.apiVersion)/models/\(model):streamGenerateContent?alt=sse") else {
             throw GeminiError.analysisFailed("Invalid API URL")
         }
@@ -474,6 +586,8 @@ final class GeminiService: GeminiServicing {
         request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+        // Request body with conversation history and generation config
+        // MEDIA_RESOLUTION_MEDIUM balances quality vs. processing speed for video
         let body: [String: Any] = [
             "contents": contents,
             "generationConfig": [
@@ -483,8 +597,8 @@ final class GeminiService: GeminiServicing {
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        // Use retry logic for streaming request with conservative policy
-        // (streaming connections are more sensitive to retries)
+        // Use conservative retry policy for streaming connections
+        // Streaming is more sensitive to retries - failed streams should fail fast
         let (bytes, response) = try await retryExecutor.execute(
             policy: .conservative
         ) {

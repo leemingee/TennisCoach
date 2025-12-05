@@ -294,7 +294,7 @@ final class VideoCompressor: VideoCompressing {
             }
         } catch {
             // Silently fail - cleanup is best effort
-            print("Warning: Failed to clean up temporary files: \(error.localizedDescription)")
+            AppLogger.warning("Failed to clean up temporary files: \(error.localizedDescription)", category: AppLogger.video)
         }
     }
 
@@ -392,17 +392,17 @@ final class VideoCompressor: VideoCompressing {
                 let compressionRatio = Double(outputSize) / Double(inputSize)
                 let savedSpace = inputSize - outputSize
 
-                print("""
-                    Video Compression Results:
-                    - Quality: \(quality)
-                    - Input size: \(formatBytes(inputSize))
-                    - Output size: \(formatBytes(outputSize))
-                    - Compression ratio: \(String(format: "%.1f%%", compressionRatio * 100))
-                    - Space saved: \(formatBytes(savedSpace))
-                    """)
+                AppLogger.info("""
+                    Video Compression Results: \
+                    Quality: \(quality), \
+                    Input: \(formatBytes(inputSize)), \
+                    Output: \(formatBytes(outputSize)), \
+                    Ratio: \(String(format: "%.1f%%", compressionRatio * 100)), \
+                    Saved: \(formatBytes(savedSpace))
+                    """, category: AppLogger.video)
             }
         } catch {
-            print("Warning: Could not log compression results: \(error.localizedDescription)")
+            AppLogger.warning("Could not log compression results: \(error.localizedDescription)", category: AppLogger.video)
         }
     }
 

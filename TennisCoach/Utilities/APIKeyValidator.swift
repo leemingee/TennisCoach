@@ -147,7 +147,7 @@ enum APIKeyValidator {
             try SecureKeyManager.shared.saveGeminiAPIKey(envKey)
             return true
         } catch {
-            print("Failed to migrate API key: \(error.localizedDescription)")
+            AppLogger.error("Failed to migrate API key: \(error.localizedDescription)", category: AppLogger.data)
             return false
         }
     }
@@ -183,16 +183,16 @@ enum APIKeyValidator {
         return diagnostics
     }
 
-    /// Prints diagnostic information to the console.
+    /// Logs diagnostic information for debugging API key configuration issues.
     ///
-    /// This is useful for debugging API key configuration issues.
+    /// Uses AppLogger.data for structured logging instead of print statements.
     static func printDiagnostics() {
-        print("=== API Key Diagnostics ===")
+        AppLogger.debug("=== API Key Diagnostics ===", category: AppLogger.data)
         let diagnostics = getDiagnostics()
         for (key, value) in diagnostics.sorted(by: { $0.key < $1.key }) {
-            print("\(key): \(value)")
+            AppLogger.debug("\(key): \(value)", category: AppLogger.data)
         }
-        print("=========================")
+        AppLogger.debug("=========================", category: AppLogger.data)
     }
 }
 

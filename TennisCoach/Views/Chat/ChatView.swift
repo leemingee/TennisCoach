@@ -90,6 +90,10 @@ struct ChatView: View {
         .task {
             await viewModel.loadConversation(modelContext: modelContext)
         }
+        .onDisappear {
+            // Cancel any ongoing streaming to prevent memory leaks and wasted network
+            viewModel.cancelStreaming()
+        }
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy) {

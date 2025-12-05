@@ -16,7 +16,7 @@ struct TennisCoachApp: App {
             return try ModelContainer(for: schema, configurations: [modelConfiguration])
         } catch {
             // Log the error for debugging
-            print("Failed to create persistent ModelContainer: \(error)")
+            AppLogger.critical("Failed to create persistent ModelContainer: \(error.localizedDescription)", category: AppLogger.data)
 
             // Fallback to in-memory storage to prevent crashes
             do {

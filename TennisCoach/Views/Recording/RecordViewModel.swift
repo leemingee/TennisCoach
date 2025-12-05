@@ -6,11 +6,21 @@ import Photos
 
 // MARK: - Camera State
 
+/// State machine for camera lifecycle.
+///
+/// The camera progresses through states:
+/// ```
+/// initializing → ready ⟷ recording
+///       ↓          ↓
+///    error ←───────┘
+/// ```
+///
+/// UI binds to this state to show appropriate overlays and enable/disable controls.
 enum CameraState: Equatable {
-    case initializing
-    case ready
-    case recording
-    case error(String)
+    case initializing  // Camera session starting up
+    case ready         // Session running, can start recording
+    case recording     // Currently recording video
+    case error(String) // Something went wrong, show message
 
     var isReady: Bool {
         if case .ready = self { return true }
@@ -23,6 +33,23 @@ enum CameraState: Equatable {
     }
 }
 
+/// ViewModel managing the Recording screen state.
+///
+/// ## Responsibilities:
+/// - Camera session lifecycle (setup, pause, resume)
+/// - Recording start/stop with duration timer
+/// - Video persistence to SwiftData and Photos Library
+/// - Camera state machine for UI binding
+///
+/// ## Threading:
+/// - Marked @MainActor for safe @Published property updates
+/// - Timer uses Task with @MainActor to avoid race conditions
+/// - VideoRecorder operations are async
+///
+/// ## Key Patterns:
+/// - Uses CameraState enum for clear UI state binding
+/// - Saves video to both app storage (SwiftData) and Photos Library
+/// - Generates thumbnail asynchronously after recording
 @MainActor
 final class RecordViewModel: ObservableObject {
 
@@ -34,11 +61,13 @@ final class RecordViewModel: ObservableObject {
     @Published var recordingDuration: TimeInterval = 0
     @Published var error: String?
     @Published var savedVideo: Video?
+    @Published var showDurationWarning = false  // Shows when approaching time limit
 
     // MARK: - Private Properties
 
     private var videoRecorder: VideoRecorder?
     private var timerTask: Task<Void, Never>?
+    private var modelContextForAutoStop: ModelContext?  // Store for auto-stop
 
     var previewLayer: CALayer {
         videoRecorder?.previewLayer ?? CALayer()
@@ -47,6 +76,22 @@ final class RecordViewModel: ObservableObject {
     /// Check if camera is ready for recording
     var canRecord: Bool {
         cameraState.isReady && !isProcessing
+    }
+
+    /// Maximum recording duration based on Gemini upload limits
+    var maxRecordingDuration: TimeInterval {
+        Constants.Video.maxDuration
+    }
+
+    /// Remaining recording time
+    var remainingTime: TimeInterval {
+        max(0, maxRecordingDuration - recordingDuration)
+    }
+
+    /// Formatted remaining time for display (e.g., "0:25")
+    var formattedRemainingTime: String {
+        let remaining = Int(remainingTime)
+        return String(format: "%d:%02d", remaining / 60, remaining % 60)
     }
 
     // MARK: - Setup
@@ -115,6 +160,8 @@ final class RecordViewModel: ObservableObject {
         if isRecording {
             await stopRecording(modelContext: modelContext)
         } else {
+            // Store context for auto-stop functionality
+            modelContextForAutoStop = modelContext
             startRecording()
         }
     }
@@ -220,13 +267,49 @@ final class RecordViewModel: ObservableObject {
 
     // MARK: - Timer
 
+    /// Start a 1-second interval timer to track recording duration.
+    ///
+    /// ## Why Task-based timer instead of Timer.publish?
+    /// - Automatically cooperative with Swift Concurrency
+    /// - Cancellable via Task.cancel()
+    /// - @MainActor ensures thread-safe @Published updates
+    ///
+    /// ## Race Condition Fix (P0):
+    /// The @MainActor annotation on the Task closure ensures recordingDuration
+    /// is always updated on the main thread, fixing the race condition that
+    /// previously caused crashes when Timer fired on a background queue.
+    ///
+    /// ## Duration Limit Feature:
+    /// The timer now monitors duration and:
+    /// - Shows warning when approaching limit (10 seconds before)
+    /// - Auto-stops recording when limit is reached
     private func startDurationTimer() {
-        // Use Task-based timer with MainActor to avoid race conditions
+        showDurationWarning = false
+
         timerTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
-                guard !Task.isCancelled else { break }
-                self?.recordingDuration += 1
+                guard !Task.isCancelled, let self = self else { break }
+
+                self.recordingDuration += 1
+
+                // Check if approaching duration limit (10 seconds warning)
+                let warningThreshold = Constants.Video.durationWarningThreshold
+                if self.recordingDuration >= warningThreshold && !self.showDurationWarning {
+                    self.showDurationWarning = true
+                    AppLogger.info("Recording approaching time limit", category: AppLogger.video)
+                }
+
+                // Check if duration limit reached - auto-stop
+                let maxDuration = Constants.Video.maxDuration
+                if self.recordingDuration >= maxDuration {
+                    AppLogger.info("Recording reached time limit, auto-stopping", category: AppLogger.video)
+                    // Auto-stop recording
+                    if let context = self.modelContextForAutoStop {
+                        await self.stopRecording(modelContext: context)
+                    }
+                    break
+                }
             }
         }
     }
@@ -234,6 +317,7 @@ final class RecordViewModel: ObservableObject {
     private func stopDurationTimer() {
         timerTask?.cancel()
         timerTask = nil
+        showDurationWarning = false
     }
 
     // MARK: - Error Handling

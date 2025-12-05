@@ -31,10 +31,14 @@ struct RecordView: View {
                     VStack {
                         Spacer()
 
-                        // Recording indicator
+                        // Recording indicator with time limit warning
                         if viewModel.isRecording {
-                            RecordingIndicator(duration: viewModel.recordingDuration)
-                                .padding(.bottom, 20)
+                            RecordingIndicator(
+                                duration: viewModel.recordingDuration,
+                                remainingTime: viewModel.remainingTime,
+                                showWarning: viewModel.showDurationWarning
+                            )
+                            .padding(.bottom, 20)
                         }
 
                         // Record button
@@ -140,34 +144,60 @@ struct RecordButton: View {
 
 struct RecordingIndicator: View {
     let duration: TimeInterval
+    let remainingTime: TimeInterval
+    let showWarning: Bool
     @State private var isBlinking = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(Color.red)
-                .frame(width: 12, height: 12)
-                .opacity(isBlinking ? 1 : 0.3)
+        VStack(spacing: 8) {
+            // Main duration display
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(showWarning ? Color.orange : Color.red)
+                    .frame(width: 12, height: 12)
+                    .opacity(isBlinking ? 1 : 0.3)
 
-            Text(formattedDuration)
-                .font(.system(.title2, design: .monospaced))
-                .foregroundColor(.white)
+                Text(formattedDuration)
+                    .font(.system(.title2, design: .monospaced))
+                    .foregroundColor(.white)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(showWarning ? Color.orange.opacity(0.3) : Color.black.opacity(0.6))
+            .clipShape(Capsule())
+
+            // Remaining time warning
+            if showWarning {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                    Text("剩余 \(formattedRemaining)")
+                        .font(.caption.bold())
+                }
+                .foregroundColor(.orange)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .background(Color.black.opacity(0.7))
+                .clipShape(Capsule())
+            }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color.black.opacity(0.6))
-        .clipShape(Capsule())
         .onAppear {
             withAnimation(.easeInOut(duration: 0.5).repeatForever()) {
                 isBlinking = true
             }
         }
+        .animation(.easeInOut(duration: 0.3), value: showWarning)
     }
 
     private var formattedDuration: String {
         let minutes = Int(duration) / 60
         let seconds = Int(duration) % 60
         return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    private var formattedRemaining: String {
+        let remaining = max(0, Int(remainingTime))
+        return "\(remaining)秒"
     }
 }
 

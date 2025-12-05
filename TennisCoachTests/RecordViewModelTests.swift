@@ -1,6 +1,7 @@
 import XCTest
 import SwiftData
 import AVFoundation
+import Combine
 @testable import TennisCoach
 
 // MARK: - Mock VideoRecorder

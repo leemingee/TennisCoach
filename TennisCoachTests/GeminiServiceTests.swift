@@ -1,32 +1,12 @@
 import XCTest
 @testable import TennisCoach
 
-// MARK: - Mock URLSession
-
-class MockURLSession: URLSession {
-    var mockData: Data?
-    var mockResponse: URLResponse?
-    var mockError: Error?
-    var mockBytesResponse: (Data, URLResponse)?
-
-    override func data(for request: URLRequest) async throws -> (Data, URLResponse) {
-        if let error = mockError {
-            throw error
-        }
-        return (mockData ?? Data(), mockResponse ?? URLResponse())
-    }
-
-    override func data(from url: URL) async throws -> (Data, URLResponse) {
-        if let error = mockError {
-            throw error
-        }
-        return (mockData ?? Data(), mockResponse ?? URLResponse())
-    }
-}
+// Note: URLSession cannot be easily mocked via inheritance because its async
+// data methods are not overridable. We use protocol-based mocking instead.
 
 // MARK: - Mock GeminiService
 
-class MockGeminiService: GeminiServicing {
+class MockGeminiService: GeminiServicing, @unchecked Sendable {
     var uploadVideoResult: Result<String, Error> = .success("files/mock-file-uri")
     var analyzeVideoResult: Result<String, Error> = .success("Mock analysis result")
     var chatResult: Result<String, Error> = .success("Mock chat response")
@@ -39,8 +19,11 @@ class MockGeminiService: GeminiServicing {
     var lastChatHistory: [Message]?
     var lastChatMessage: String?
 
-    func uploadVideo(localURL: URL) async throws -> String {
+    func uploadVideo(localURL: URL, progressHandler: ((Double) -> Void)?) async throws -> String {
         uploadVideoCallCount += 1
+        // Simulate progress
+        progressHandler?(0.5)
+        progressHandler?(1.0)
         switch uploadVideoResult {
         case .success(let uri):
             return uri
@@ -103,7 +86,7 @@ final class GeminiServiceTests: XCTestCase {
         XCTAssertTrue(GeminiError.uploadFailed("test error").errorDescription!.contains("test error"))
 
         XCTAssertNotNil(GeminiError.fileProcessing.errorDescription)
-        XCTAssertNotNil(GeminiError.analysisFaild("test").errorDescription)
+        XCTAssertNotNil(GeminiError.analysisFailed("test").errorDescription)
         XCTAssertNotNil(GeminiError.invalidResponse.errorDescription)
     }
 
@@ -196,21 +179,27 @@ final class GeminiServiceTests: XCTestCase {
 
 // MARK: - GeminiError Equatable
 
-extension GeminiError: Equatable {
+extension GeminiError: @retroactive Equatable {
     public static func == (lhs: GeminiError, rhs: GeminiError) -> Bool {
         switch (lhs, rhs) {
         case (.invalidAPIKey, .invalidAPIKey):
             return true
         case (.uploadFailed(let l), .uploadFailed(let r)):
             return l == r
+        case (.fileTooLarge(let ls, let lm), .fileTooLarge(let rs, let rm)):
+            return ls == rs && lm == rm
         case (.fileProcessing, .fileProcessing):
             return true
-        case (.analysisFaild(let l), .analysisFaild(let r)):
+        case (.analysisFailed(let l), .analysisFailed(let r)):
             return l == r
         case (.invalidResponse, .invalidResponse):
             return true
         case (.networkError, .networkError):
             return true
+        case (.uploadCancelled, .uploadCancelled):
+            return true
+        case (.httpError(let lc, _), .httpError(let rc, _)):
+            return lc == rc
         default:
             return false
         }

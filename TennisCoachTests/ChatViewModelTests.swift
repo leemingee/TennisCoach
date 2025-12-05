@@ -167,7 +167,7 @@ final class ChatViewModelTests: XCTestCase {
         try modelContext.save()
 
         let mockService = MockGeminiService()
-        mockService.analyzeVideoResult = .failure(GeminiError.analysisFaild("Test error"))
+        mockService.analyzeVideoResult = .failure(GeminiError.analysisFailed("Test error"))
 
         let viewModel = ChatViewModel(video: video, geminiService: mockService)
         await viewModel.loadConversation(modelContext: modelContext)

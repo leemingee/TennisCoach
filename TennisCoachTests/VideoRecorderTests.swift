@@ -50,29 +50,8 @@ class MockMovieFileOutput: AVCaptureMovieFileOutput {
     }
 }
 
-// MARK: - Mock VideoRecorder for Testing
-
-class MockVideoRecorder: VideoRecorder {
-    var mockMovieOutput = MockMovieFileOutput()
-    var permissionsGranted = true
-
-    override init() {
-        super.init()
-        // Replace the movie output with our mock
-        setValue(mockMovieOutput, forKey: "movieOutput")
-    }
-
-    override func requestPermissions() async -> Bool {
-        return permissionsGranted
-    }
-
-    override func startSession() async throws {
-        if !permissionsGranted {
-            throw VideoRecorderError.permissionDenied
-        }
-        // Skip actual session configuration for tests
-    }
-}
+// Note: VideoRecorder is a final class and cannot be mocked via inheritance.
+// Tests use the actual VideoRecorder or test its static methods directly.
 
 // MARK: - Test Video Generator
 
@@ -604,7 +583,7 @@ final class VideoRecorderTests: XCTestCase {
 
 // MARK: - VideoRecorderError Equatable Extension
 
-extension VideoRecorderError: Equatable {
+extension VideoRecorderError: @retroactive Equatable {
     public static func == (lhs: VideoRecorderError, rhs: VideoRecorderError) -> Bool {
         switch (lhs, rhs) {
         case (.cameraUnavailable, .cameraUnavailable):
@@ -620,6 +599,8 @@ extension VideoRecorderError: Equatable {
         case (.noRecordingInProgress, .noRecordingInProgress):
             return true
         case (.recordingTimeout, .recordingTimeout):
+            return true
+        case (.lensNotAvailable, .lensNotAvailable):
             return true
         default:
             return false

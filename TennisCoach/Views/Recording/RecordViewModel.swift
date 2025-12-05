@@ -349,6 +349,24 @@ final class RecordViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Focus
+
+    /// Check if tap-to-focus is supported
+    var supportsTapToFocus: Bool {
+        videoRecorder?.supportsTapToFocus ?? false
+    }
+
+    /// Focus at a specific point in the camera view.
+    /// - Parameter point: Normalized point (0,0 to 1,1)
+    func focusAt(point: CGPoint) {
+        videoRecorder?.focusAt(point: point)
+    }
+
+    /// Reset to continuous auto-focus
+    func resetFocus() {
+        videoRecorder?.resetFocus()
+    }
+
     // MARK: - Error Handling
 
     func dismissError() {

@@ -397,6 +397,82 @@ final class VideoRecorder: NSObject, VideoRecording {
         AppLogger.info("Applied \(clampedFactor)x digital zoom", category: AppLogger.video)
     }
 
+    // MARK: - Focus
+
+    /// Check if the current camera supports tap-to-focus.
+    var supportsTapToFocus: Bool {
+        guard let device = currentVideoDevice else { return false }
+        return device.isFocusPointOfInterestSupported
+    }
+
+    /// Focus at a specific point in the camera view.
+    ///
+    /// The point should be in normalized coordinates (0,0 to 1,1) where:
+    /// - (0,0) is top-left
+    /// - (1,1) is bottom-right
+    ///
+    /// This method sets:
+    /// - Focus point of interest
+    /// - Auto-focus mode (continuous -> auto-focus at point)
+    /// - Exposure point of interest (matches focus point)
+    ///
+    /// - Parameter point: Normalized point in the camera view
+    func focusAt(point: CGPoint) {
+        guard let device = currentVideoDevice else {
+            AppLogger.warning("No video device for focus", category: AppLogger.video)
+            return
+        }
+
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+
+            // Set focus point and mode
+            if device.isFocusPointOfInterestSupported {
+                device.focusPointOfInterest = point
+                if device.isFocusModeSupported(.autoFocus) {
+                    device.focusMode = .autoFocus
+                }
+            }
+
+            // Set exposure point to match focus (common pattern)
+            if device.isExposurePointOfInterestSupported {
+                device.exposurePointOfInterest = point
+                if device.isExposureModeSupported(.autoExpose) {
+                    device.exposureMode = .autoExpose
+                }
+            }
+
+            AppLogger.debug("Focus set at (\(point.x), \(point.y))", category: AppLogger.video)
+        } catch {
+            AppLogger.error("Failed to set focus: \(error)", category: AppLogger.video)
+        }
+    }
+
+    /// Reset focus to continuous auto-focus.
+    func resetFocus() {
+        guard let device = currentVideoDevice else { return }
+
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+
+            // Reset to continuous auto-focus
+            if device.isFocusModeSupported(.continuousAutoFocus) {
+                device.focusMode = .continuousAutoFocus
+            }
+
+            // Reset to continuous auto-exposure
+            if device.isExposureModeSupported(.continuousAutoExposure) {
+                device.exposureMode = .continuousAutoExposure
+            }
+
+            AppLogger.debug("Focus reset to continuous", category: AppLogger.video)
+        } catch {
+            AppLogger.error("Failed to reset focus: \(error)", category: AppLogger.video)
+        }
+    }
+
     // MARK: - Recording
 
     func startRecording() throws {

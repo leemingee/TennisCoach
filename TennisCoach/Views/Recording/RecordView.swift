@@ -4,13 +4,30 @@ import SwiftData
 struct RecordView: View {
     @Environment(\.modelContext) private var modelContext
     @StateObject private var viewModel = RecordViewModel()
+    @State private var focusPoint: CGPoint?
+    @State private var showFocusIndicator = false
 
     var body: some View {
         NavigationStack {
             ZStack {
-                // Camera Preview
+                // Camera Preview with tap-to-focus
                 CameraPreviewView(previewLayer: viewModel.previewLayer)
                     .ignoresSafeArea()
+                    .overlay {
+                        // Tap-to-focus gesture area
+                        GeometryReader { geometry in
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture { location in
+                                    handleTapToFocus(at: location, in: geometry.size)
+                                }
+                        }
+                    }
+
+                // Focus indicator
+                if showFocusIndicator, let point = focusPoint {
+                    FocusIndicator(position: point)
+                }
 
                 // Loading overlay while camera initializes
                 if case .initializing = viewModel.cameraState {
@@ -93,6 +110,62 @@ struct RecordView: View {
                 ChatView(video: video)
             }
         }
+    }
+
+    // MARK: - Tap to Focus
+
+    /// Handle tap-to-focus gesture.
+    /// Converts screen coordinates to normalized camera coordinates.
+    private func handleTapToFocus(at location: CGPoint, in size: CGSize) {
+        guard viewModel.supportsTapToFocus else { return }
+        guard viewModel.cameraState.isReady || viewModel.cameraState.isRecording else { return }
+
+        // Convert to normalized coordinates (0,0 to 1,1)
+        // Note: Camera coordinate system may be flipped compared to screen
+        let normalizedPoint = CGPoint(
+            x: location.x / size.width,
+            y: location.y / size.height
+        )
+
+        // Update focus
+        viewModel.focusAt(point: normalizedPoint)
+
+        // Show focus indicator
+        focusPoint = location
+        showFocusIndicator = true
+
+        // Hide indicator after animation
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation(.easeOut(duration: 0.3)) {
+                showFocusIndicator = false
+            }
+        }
+    }
+}
+
+// MARK: - Focus Indicator
+
+/// Yellow square focus indicator that appears on tap-to-focus.
+struct FocusIndicator: View {
+    let position: CGPoint
+    @State private var scale: CGFloat = 1.5
+    @State private var opacity: Double = 1.0
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 4)
+            .stroke(Color.yellow, lineWidth: 2)
+            .frame(width: 70, height: 70)
+            .scaleEffect(scale)
+            .opacity(opacity)
+            .position(position)
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    scale = 1.0
+                }
+                withAnimation(.easeOut(duration: 0.3).delay(1.0)) {
+                    opacity = 0.0
+                }
+            }
     }
 }
 

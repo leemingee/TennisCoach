@@ -205,67 +205,110 @@ struct FullScreenVideoPlayer: View {
     }
 }
 
-// MARK: - Video Preview Header (Compact version for ChatView)
+// MARK: - Video Preview Header (Collapsible version for ChatView)
 
+/// A collapsible video preview header that allows users to expand/collapse
+/// the video player to focus on chat messages.
+///
+/// ## UI Design:
+/// - Large, prominent fold/unfold toggle bar (44pt minimum touch target)
+/// - When expanded: smaller thumbnail (120pt) with explicit play button
+/// - Toggle and play actions are clearly separated to prevent accidental taps
 struct VideoPreviewHeader: View {
     let video: Video
     @State private var showPlayer = false
+    @State private var isExpanded = true
 
     var body: some View {
-        Button {
-            showPlayer = true
-        } label: {
-            ZStack {
-                // Thumbnail or placeholder
-                if let thumbnailData = video.thumbnailData,
-                   let uiImage = UIImage(data: thumbnailData) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(height: 180)
-                        .clipped()
-                } else {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(height: 180)
-                        .overlay {
-                            Image(systemName: "video.fill")
-                                .font(.system(size: 40))
-                                .foregroundColor(.gray)
-                        }
+        VStack(spacing: 0) {
+            // Collapse/Expand toggle bar - large touch target
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    isExpanded.toggle()
                 }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
+                        .font(.system(size: 24))
+                        .foregroundColor(.accentColor)
 
-                // Play button overlay
-                Circle()
-                    .fill(Color.black.opacity(0.6))
-                    .frame(width: 60, height: 60)
-                    .overlay {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 24))
-                            .foregroundColor(.white)
-                            .offset(x: 2)
-                    }
-
-                // Duration badge
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(isExpanded ? "收起视频" : "展开视频")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundColor(.primary)
                         Text(video.formattedDuration)
                             .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.black.opacity(0.7))
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                            .padding(8)
+                            .foregroundColor(.secondary)
                     }
+
+                    Spacer()
+
+                    Image(systemName: "video.fill")
+                        .foregroundColor(.secondary)
                 }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 4)
+                .contentShape(Rectangle())
             }
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .buttonStyle(.plain)
+
+            // Collapsible video preview - compact size
+            if isExpanded {
+                HStack(spacing: 12) {
+                    // Compact thumbnail
+                    ZStack {
+                        if let thumbnailData = video.thumbnailData,
+                           let uiImage = UIImage(data: thumbnailData) {
+                            Image(uiImage: uiImage)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 160, height: 90)
+                                .clipped()
+                        } else {
+                            Rectangle()
+                                .fill(Color.gray.opacity(0.3))
+                                .frame(width: 160, height: 90)
+                                .overlay {
+                                    Image(systemName: "video.fill")
+                                        .font(.system(size: 24))
+                                        .foregroundColor(.gray)
+                                }
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                    // Play button - separate from thumbnail
+                    Button {
+                        showPlayer = true
+                    } label: {
+                        VStack(spacing: 8) {
+                            Circle()
+                                .fill(Color.accentColor)
+                                .frame(width: 50, height: 50)
+                                .overlay {
+                                    Image(systemName: "play.fill")
+                                        .font(.system(size: 20))
+                                        .foregroundColor(.white)
+                                        .offset(x: 2)
+                                }
+
+                            Text("播放")
+                                .font(.caption)
+                                .foregroundColor(.accentColor)
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+                }
+                .padding(.top, 4)
+                .padding(.bottom, 8)
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .move(edge: .top)),
+                    removal: .opacity.combined(with: .move(edge: .top))
+                ))
+            }
         }
-        .buttonStyle(.plain)
         .sheet(isPresented: $showPlayer) {
             if let url = video.localURL {
                 NavigationStack {

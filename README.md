@@ -4,11 +4,29 @@ An iOS app for recording tennis videos and getting AI-powered analysis using Goo
 
 ## Features
 
+### Core Features
 - **Video Recording**: Record tennis practice/match videos with 60fps support
 - **AI Analysis**: Get professional-level tennis technique analysis powered by Gemini
 - **Interactive Chat**: Ask follow-up questions about your technique
 - **Video Management**: Browse and manage recorded videos
 - **Secure API Key Storage**: API keys stored securely in iOS Keychain
+
+### Video Playback (v1.1)
+- **In-App Video Player**: Play recorded videos directly within the app
+- **Full-Screen Playback**: Tap to expand videos to full screen with native controls
+- **Save to Photos**: Export videos to iPhone Photos Library for backup and sharing
+- **Auto-Save Option**: Videos automatically saved to Photos Library after recording
+
+### Camera Improvements (v1.1)
+- **Smart Initialization**: Loading indicator during camera setup
+- **Session Management**: Camera automatically resumes when returning to Recording tab
+- **State Indicators**: Clear visual feedback for camera status (initializing, ready, recording, error)
+- **Error Recovery**: Retry button when camera initialization fails
+
+### Settings & About (v1.1)
+- **Developer Contact**: Email link for support
+- **GitHub Repository**: Direct link to source code
+- **Contribution Info**: Open source contribution invitation
 
 ## Requirements
 
@@ -21,7 +39,7 @@ An iOS app for recording tennis videos and getting AI-powered analysis using Goo
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/TennisCoach.git
+git clone https://github.com/leemingee/TennisCoach.git
 cd TennisCoach
 ```
 
@@ -42,6 +60,7 @@ open TennisCoach.xcodeproj
 1. Visit [Google AI Studio](https://aistudio.google.com/apikey)
 2. Create a new API key
 3. Enter it in the app's Settings tab
+4. Tap "Test Connection" to verify
 
 ## Project Structure
 
@@ -54,26 +73,28 @@ TennisCoach/
 │   ├── Conversation.swift        # Chat conversation entity
 │   └── Message.swift             # Chat message entity
 ├── Services/
-│   ├── GeminiService.swift       # Gemini API integration
+│   ├── GeminiService.swift       # Gemini API integration with retry logic
 │   ├── VideoRecorder.swift       # AVFoundation video recording
-│   ├── VideoCompressor.swift     # Video compression
-│   └── Prompts.swift             # AI analysis prompts
+│   ├── VideoCompressor.swift     # Video compression for upload
+│   └── Prompts.swift             # AI analysis prompts (Chinese)
 ├── Views/
 │   ├── Recording/
-│   │   ├── RecordView.swift
-│   │   └── RecordViewModel.swift
+│   │   ├── RecordView.swift      # Camera preview and controls
+│   │   └── RecordViewModel.swift # Recording state management
 │   ├── VideoList/
-│   │   └── VideoListView.swift
+│   │   └── VideoListView.swift   # Video gallery grid
+│   ├── VideoPlayer/
+│   │   └── VideoPlayerView.swift # Video playback components
 │   └── Chat/
-│       ├── ChatView.swift
-│       └── ChatViewModel.swift
+│       ├── ChatView.swift        # AI chat interface
+│       └── ChatViewModel.swift   # Chat state and API calls
 └── Utilities/
     ├── Constants.swift           # App constants & API config
     ├── SecureKeyManager.swift    # Keychain API key storage
     ├── APIKeySetupView.swift     # API key configuration UI
     ├── APIKeyValidator.swift     # API key validation
     ├── RetryPolicy.swift         # Network retry logic
-    └── AppLogger.swift           # Structured logging
+    └── AppLogger.swift           # Structured logging (OSLog)
 
 TennisCoachTests/
 ├── RecordViewModelTests.swift
@@ -86,28 +107,76 @@ TennisCoachTests/
 
 ## Architecture
 
+### Design Patterns
 - **MVVM Pattern**: Clear separation of Views, ViewModels, and Models
-- **Protocol-Oriented**: Services use protocols for testability
-- **SwiftData**: Modern persistence using Apple's SwiftData framework
-- **Async/Await**: Modern Swift concurrency throughout
-- **Keychain Security**: Secure storage for sensitive API keys
+- **Protocol-Oriented**: Services use protocols for testability and dependency injection
+- **Async/Await**: Modern Swift concurrency throughout (no completion handlers)
+- **Combine**: Reactive state management with @Published properties
+
+### Data Persistence
+- **SwiftData**: Conversation history, messages, video metadata
+- **Photos Library**: Video files (optional, user-controlled export)
+- **Keychain**: Secure API key storage (encrypted, device-only)
+- **FileManager**: Video files in app Documents directory
+
+### Service Layer
+- **VideoRecorder**: AVFoundation-based recording with 60fps, session state management
+- **GeminiService**: Streaming API integration with exponential backoff retry
+- **VideoCompressor**: H.264 compression for efficient uploads
 
 ## Key Features Implementation
 
 ### Video Recording
 - Uses AVFoundation for high-quality 60fps video capture
-- Automatic thumbnail generation
-- Background file management
+- Automatic thumbnail generation from first frame
+- Camera state machine: initializing → ready → recording → processing
+- Session pause/resume for tab switching
+
+### Video Playback
+- AVKit-based VideoPlayer with native controls
+- Full-screen expansion with dismiss gesture
+- Photos Library integration via PHPhotoLibrary
+- Thumbnail caching for smooth scrolling
 
 ### AI Analysis
-- Streaming responses for real-time feedback
-- Exponential backoff retry logic for reliability
-- Progress tracking for video uploads
+- Streaming responses via AsyncThrowingStream for real-time feedback
+- Exponential backoff retry logic (up to 5 attempts)
+- Progress tracking for video uploads (0-100%)
+- Conversation history maintained per video
 
 ### Security
 - API keys stored in iOS Keychain (not in code or UserDefaults)
 - Keys are device-only, not backed up to iCloud
 - Connection validation before use
+- No sensitive data logged
+
+## Privacy & Permissions
+
+The app requests the following iOS permissions:
+
+### Camera Access (Required)
+- **Purpose**: Record tennis practice and match videos
+- **When Requested**: First time opening Recording tab
+- **If Denied**: Camera preview shows error with instructions
+
+### Microphone Access (Required)
+- **Purpose**: Capture audio during video recording
+- **When Requested**: First time opening Recording tab
+- **If Denied**: Videos record without audio
+
+### Photo Library Access (Optional)
+- **Purpose**: Save recorded videos to Photos app
+- **Permission Type**: "Add Photos Only" (limited access)
+- **When Requested**: When tapping "Save to Photos" button
+- **If Denied**: Videos remain in app, viewable within TennisCoach
+
+### Managing Permissions
+
+If you need to change permissions:
+1. Open iOS **Settings** app
+2. Scroll to **TennisCoach**
+3. Toggle permissions as needed
+4. Return to app and retry the action
 
 ## Testing
 
@@ -120,21 +189,51 @@ xcodebuild test -scheme TennisCoach -destination 'platform=iOS Simulator,name=iP
 
 ## Documentation
 
-- `DESIGN.md` - Detailed design document
-- `best-practice/` - Development guidelines
+- `DESIGN.md` - Detailed design document (Chinese)
+- `ARCHITECTURE_REVIEW.md` - Storage architecture recommendations
+- `working_docs/` - Iteration planning and code review findings
+- `best-practice/` - iOS development guidelines
 - `Documentation/` - Additional docs and examples
 
-## Privacy
+## Troubleshooting
 
-The app requires the following permissions:
-- **Camera**: To record tennis practice videos
-- **Microphone**: To capture audio with videos
-- **Photo Library**: To save and access videos
+### Camera Shows Black Screen
+1. Check camera permission in Settings → TennisCoach
+2. Close and reopen the app
+3. Tap "Retry" button if shown
+
+### "API Key Invalid" Error
+1. Verify your API key at [Google AI Studio](https://aistudio.google.com/apikey)
+2. Re-enter the key in Settings tab
+3. Tap "Test Connection" to verify
+
+### Video Upload Fails
+1. Check internet connection
+2. Ensure video file is under 100MB
+3. Try again - the app has automatic retry logic
+
+### Videos Not in Photos App
+1. Tap the video thumbnail in ChatView
+2. Tap "Save to Photos" button
+3. Grant photo library permission if prompted
+
+## Contributing
+
+Contributions welcome!
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+Please read the design document and code review findings before submitting PRs.
+
+## Contact
+
+- **Email**: leemingee1995@gmail.com
+- **GitHub**: [TennisCoach Repository](https://github.com/leemingee/TennisCoach)
 
 ## License
 
 This project is for personal/educational use.
-
-## Contributing
-
-Contributions welcome! Please read the design document before submitting PRs.
